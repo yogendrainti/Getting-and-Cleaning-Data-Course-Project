@@ -1,53 +1,49 @@
+# Load Packages and get the Data
+packages <- c("data.table", "reshape2")
+sapply(packages, require, character.only=TRUE, quietly=TRUE)
+path <- getwd()
+url <- "https://d396qusza40orc.cloudfront.net/getdata%2Fprojectfiles%2FUCI%20HAR%20Dataset.zip"
+download.file(url, file.path(path, "dataFiles.zip"))
+unzip(zipfile = "dataFiles.zip")
 ## Load "dyplr" package
 library(dyplr)
+# Load activity labels + features
+activityLabels <- fread(file.path(path, "UCI HAR Dataset/activity_labels.txt")
+                        , col.names = c("classLabels", "activityName"))
+features <- fread(file.path(path, "UCI HAR Dataset/features.txt")
+                  , col.names = c("index", "featureNames"))
+featuresWanted <- grep("(mean|std)\\(\\)", features[, featureNames])
+measurements <- features[featuresWanted, featureNames]
+measurements <- gsub('[()]', '', measurements)
 
-## Set data set directory
-setwd("~/Desktop/Coursera Data Science/UCI HAR Dataset")
+# Load train datasets
+train <- fread(file.path(path, "UCI HAR Dataset/train/X_train.txt"))[, featuresWanted, with = FALSE]
+data.table::setnames(train, colnames(train), measurements)
+trainActivities <- fread(file.path(path, "UCI HAR Dataset/train/Y_train.txt")
+                         , col.names = c("Activity"))
+trainSubjects <- fread(file.path(path, "UCI HAR Dataset/train/subject_train.txt")
+                       , col.names = c("SubjectNum"))
+train <- cbind(trainSubjects, trainActivities, train)
 
-## read train and test data set
-x_train <- read.table("./train/X_train.txt")
-y_train <- read.table("./train/Y_train.txt")
-subject_train <- read.table("./train/subject_train.txt")
+# Load test datasets
+test <- fread(file.path(path, "UCI HAR Dataset/test/X_test.txt"))[, featuresWanted, with = FALSE]
+data.table::setnames(test, colnames(test), measurements)
+testActivities <- fread(file.path(path, "UCI HAR Dataset/test/Y_test.txt")
+                        , col.names = c("Activity"))
+testSubjects <- fread(file.path(path, "UCI HAR Dataset/test/subject_test.txt")
+                      , col.names = c("SubjectNum"))
+test <- cbind(testSubjects, testActivities, test)
 
-x_test <- read.table("./test/X_test.txt")
-y_test <- read.table("./test/Y_test.txt")
-subject_test <- read.table("./test/subject_test.txt")
+# merge datasets
+combined <- rbind(train, test)
 
-## Merge train and test data sets
-x_total <- rbind(x_train, x_test)
-y_total <- rbind(y_train, y_test)
-subject_total <- rbind(subject_train, subject_test)
+# Convert classLabels to activityName basically. More explicit. 
+combined[["Activity"]] <- factor(combined[, Activity]
+                                 , levels = activityLabels[["classLabels"]]
+                                 , labels = activityLabels[["activityName"]])
 
-## read features description and activity labels
-features <- read.table("./features.txt")
-activity_labels <- read.table("./activity_labels.txt")
+combined[["SubjectNum"]] <- as.factor(combined[, SubjectNum])
+combined <- reshape2::melt(data = combined, id = c("SubjectNum", "Activity"))
+combined <- reshape2::dcast(data = combined, SubjectNum + Activity ~ variable, fun.aggregate = mean)
 
-## Extract only the measurements on the mean and standard deviation for 
-## each measurement
-select_features <- variable.names[grep(".*mean\\(\\) | std\\(\\)", features[,2],
-                                       ignore.case = FALSE), ]
-x_total <- x_total[, select_features[,1]]
-
-## assigning column names
-colnames(x_total) <- select_features[,2]
-colnames(y_total) <- "activity"
-colnames(subject_total) <- "subject"
-
-## merge final data set
-total <- cbind(subject_total, y_total, x_total)
-
-## turn activities and subjects into factors
-total$activity <- factor(total$activity, levels = activity_labels[,1], 
-                         labels = activity_labels[,2])
-total$subject <- as.factor(total$subject)
-
-## create a summary of independent tidy data set from final data set with the
-## average of each variable for each activity and subject
-total_mean <- total %>%
-              group_by(activity, subject) %>%
-              summarize_all(mean)
-
-## export and save the summary data set as .txt file
-write.table(total_mean, file = "./tidydata.txt", row.names = FALSE, 
-            col.names = TRUE)
-
+data.table::fwrite(x = combined, file = "tidydata.txt", quote = FALSE)
